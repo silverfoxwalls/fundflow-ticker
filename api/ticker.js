@@ -106,10 +106,19 @@ function computeIndicators(klines) {
 }
 
 function buildSignal(price, ind) {
-  const priceStackBull =
-    price > ind.ema12 && price > ind.ema48 && price > ind.ema192 && price > ind.vwap;
-  const priceStackBear =
-    price < ind.ema12 && price < ind.ema48 && price < ind.ema192 && price < ind.vwap;
+  const priceAbove12 = price > ind.ema12;
+  const priceAbove48 = price > ind.ema48;
+  const priceAbove192 = price > ind.ema192;
+  const priceAboveVWAP = price > ind.vwap;
+
+  const priceBelow12 = price < ind.ema12;
+  const priceBelow48 = price < ind.ema48;
+  const priceBelow192 = price < ind.ema192;
+  const priceBelowVWAP = price < ind.vwap;
+
+  const priceStackBull = priceAbove12 && priceAbove48 && priceAbove192 && priceAboveVWAP;
+  const priceStackBear = priceBelow12 && priceBelow48 && priceBelow192 && priceBelowVWAP;
+  const priceAlmostBull = priceAbove12 && priceAbove48 && priceAboveVWAP && !priceAbove192;
 
   const rsiBull = ind.rsi > ind.rsiSignal && ind.rsi > 55;
   const rsiBear = ind.rsi < ind.rsiSignal && ind.rsi < 45;
@@ -119,15 +128,29 @@ function buildSignal(price, ind) {
 
   const bullReady = priceStackBull && rsiBull && macdBull;
   const bearReady = priceStackBear && rsiBear && macdBear;
+  const bullWatchout = priceAlmostBull && rsiBull && macdBull;
 
   if (bullReady) {
     return {
       side: "buy",
-      label: "馃煝 Strong Buy",
+      label: "🔥 Strong Buy",
       reasons: [
-        "✅ Price stacked above EMA12/48/192 + VWAP",
-        "✅ RSI 14 > EMA3 & > 55",
-        "✅ MACD histogram positive & line > signal",
+        "✅ Price above EMA12, EMA48, EMA192 and VWAP",
+        "✅ RSI 14 > EMA3 and above 55",
+        "✅ MACD histogram > 0 and MACD line above signal",
+      ],
+    };
+  }
+
+  if (bullWatchout) {
+    return {
+      side: "watchout",
+      label: "👀 Watchout",
+      reasons: [
+        "✅ Price above EMA12, EMA48 and VWAP",
+        "⚠️ Still below EMA192",
+        "✅ RSI 14 > EMA3 and above 55",
+        "✅ MACD histogram > 0 and MACD line above signal",
       ],
     };
   }
@@ -135,39 +158,39 @@ function buildSignal(price, ind) {
   if (bearReady) {
     return {
       side: "sell",
-      label: "馃敶 Strong Sell",
+      label: "✊ Strong Sell",
       reasons: [
-        "⚠️ Price below EMA12/48/192 & VWAP",
-        "⚠️ RSI 14 < EMA3 & < 45",
-        "⚠️ MACD histogram negative & line < signal",
+        "⚠️ Price below EMA12, EMA48, EMA192 and VWAP",
+        "⚠️ RSI 14 < EMA3 and below 45",
+        "⚠️ MACD histogram < 0 and MACD line below signal",
       ],
     };
   }
 
   const blendedReasons = [
-    priceStackBull
-      ? "馃嚡 Price riding above EMA stack"
-      : priceStackBear
-      ? "馃敶 Price sinking below EMA stack"
-      : "鈿狅笍 Price tangled near EMAs/VWAP",
+    priceAbove12 && priceAbove48 && priceAboveVWAP
+      ? "✅ Price mostly above short-term trend"
+      : priceBelow12 && priceBelow48 && priceBelowVWAP
+      ? "⚠️ Price mostly below short-term trend"
+      : "➖ Price near EMA/VWAP mix",
     rsiBull
-      ? "馃憦 RSI momentum > 55 and leading"
+      ? "✅ RSI momentum leading"
       : rsiBear
-      ? "馃 RSI momentum < 45 and lagging"
-      : "鈿狅笍 RSI undecided",
+      ? "⚠️ RSI momentum fading"
+      : "➖ RSI neutral",
     macdBull
-      ? "馃搳 MACD momentum trending up"
+      ? "✅ MACD momentum rising"
       : macdBear
-      ? "馃挧 MACD momentum trending down"
-      : "鈿狅笍 MACD flat",
+      ? "⚠️ MACD momentum falling"
+      : "➖ MACD flat",
   ];
 
-  const positiveCount = [priceStackBull, rsiBull, macdBull].filter(Boolean).length;
-  const negativeCount = [priceStackBear, rsiBear, macdBear].filter(Boolean).length;
+  const positiveCount = [priceAbove12 && priceAbove48 && priceAboveVWAP, rsiBull, macdBull].filter(Boolean).length;
+  const negativeCount = [priceBelow12 && priceBelow48 && priceBelowVWAP, rsiBear, macdBear].filter(Boolean).length;
 
-  let label = "馃 Neutral";
-  if (positiveCount >= 2) label = "馃煛 Watch (Bullish lean)";
-  if (negativeCount >= 2) label = "鈿狅笍 Watch (Bearish lean)";
+  let label = "🥱 Neutral";
+  if (positiveCount >= 2) label = "Watch (Bullish lean)";
+  if (negativeCount >= 2) label = "Watch (Bearish lean)";
 
   return {
     side: positiveCount >= 2 ? "watch-bull" : negativeCount >= 2 ? "watch-bear" : "neutral",
@@ -179,7 +202,7 @@ function buildSignal(price, ind) {
 function buildPendingSignal(reason) {
   return {
     side: "neutral",
-    label: "鈿狅笍 Waiting for data",
+    label: "🥱 Neutral",
     reasons: [`Indicator pending: ${reason}`],
   };
 }
@@ -198,7 +221,7 @@ function withError(base, msg) {
     macdHistogram: null,
     signal: {
       side: "neutral",
-      label: "鈿狅笍 Data error",
+      label: "🥱 Neutral",
       reasons: [`${msg}`],
     },
   };

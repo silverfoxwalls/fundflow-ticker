@@ -69,6 +69,7 @@
     .signal-cell.sell { color: #ff5f5f; }
     .signal-cell.watch-bull { color: #81ffea; }
     .signal-cell.watch-bear { color: #ff9e7f; }
+    .signal-cell.watchout { color: #ffd166; }
     .signal-cell .reason {
       display: block;
       font-weight: 500;
@@ -110,7 +111,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td colspan="7">Loading live data鈥�</td></tr>
+        <tr><td colspan="7">Loading live data…</td></tr>
       </tbody>
     </table>
   </div>
@@ -121,14 +122,14 @@
     const API_URL = "https://fundflow-ticker-5vc0d00it-silverfoxwalls-s-projects.vercel.app/api/ticker";
 
     function formatNumber(value, decimals = 2) {
-      if (value === null || value === undefined || !isFinite(value)) return "鈿狅笍";
+      if (value === null || value === undefined || !isFinite(value)) return "—";
       return Number(value).toFixed(decimals);
     }
 
-    function makeReason(text) {
-      if (text.startsWith("✅") || text.startsWith("馃嚡") || text.startsWith("馃憦") || text.startsWith("馃搳")) return { text, className: "positive" };
-      if (text.startsWith("⚠️") || text.startsWith("馃敶") || text.startsWith("馃挧")) return { text, className: "negative" };
-      return { text, className: "neutral" };
+    function classifyReason(text) {
+      if (text.startsWith("✅")) return "positive";
+      if (text.startsWith("⚠️")) return "negative";
+      return "neutral";
     }
 
     async function loadData() {
@@ -164,16 +165,15 @@
               <div>Hist: <span class="${c.macdHistogram >= 0 ? "positive" : "negative"}">${formatNumber(c.macdHistogram, 4)}</span></div>
             </td>
             <td class="signal-cell ${signalSide}">
-              ${c.signal?.label || "馃 Neutral"}
+              ${c.signal?.label || "🥱 Neutral"}
               <div class="reason-container"></div>
             </td>
           `;
           const reasonContainer = row.querySelector(".reason-container");
           (c.signal?.reasons || []).forEach((r) => {
-            const { text, className } = makeReason(r);
             const div = document.createElement("div");
-            div.className = `reason ${className}`;
-            div.textContent = text;
+            div.className = `reason ${classifyReason(r)}`;
+            div.textContent = r;
             reasonContainer.appendChild(div);
           });
           tbody.appendChild(row);
