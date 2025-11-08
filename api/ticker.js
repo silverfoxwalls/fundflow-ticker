@@ -1,3 +1,5 @@
+import { signedFetch } from "../lib/binanceClient.js";
+
 const BINANCE_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/24hr";
 const INTERVAL = "1h";
 const CANDLE_LIMIT = 200;
@@ -5,21 +7,32 @@ const MAX_SYMBOLS = 12;
 
 export default async function handler(req, res) {
   try {
-    const tickerRes = await fetch(BINANCE_TICKER_URL);
+    const [tickerRes, positionRisk] = await Promise.all([
+      fetch(BINANCE_TICKER_URL),
+      fetchPositionRisk(),
+    ]);
+
     if (!tickerRes.ok) {
       return sendError(res, 502, `Ticker fetch failed (${tickerRes.status})`);
     }
+    const positionsBySymbol = mapPositions(positionRisk);
     const tickers = await tickerRes.json();
+
     const usdt = tickers
       .filter((s) => typeof s.symbol === "string" && s.symbol.endsWith("USDT"))
-      .map((s) => ({
-        symbol: s.symbol.replace("USDT", ""),
-        pair: s.symbol,
-        price: numberOrZero(s.lastPrice),
-        change: numberOrZero(s.priceChangePercent),
-        quoteVolume: numberOrZero(s.quoteVolume),
-        fundFlow: numberOrZero(s.quoteVolume) * (numberOrZero(s.priceChangePercent) / 100),
-      }))
+      .map((s) => {
+        const symbol = s.symbol.replace("USDT", "");
+        const position = positionsBySymbol[s.symbol] || null;
+        return {
+          symbol,
+          pair: s.symbol,
+          price: numberOrZero(s.lastPrice),
+          change: numberOrZero(s.priceChangePercent),
+          quoteVolume: numberOrZero(s.quoteVolume),
+          fundFlow: numberOrZero(s.quoteVolume) * (numberOrZero(s.priceChangePercent) / 100),
+          position,
+        };
+      })
       .sort((a, b) => b.quoteVolume - a.quoteVolume)
       .slice(0, MAX_SYMBOLS);
 
@@ -40,14 +53,27 @@ export default async function handler(req, res) {
 
         const indicators = computeIndicators(klines);
         if (!indicators.ready) {
-          enriched.push({ ...base, ...indicators, signal: buildPendingSignal(indicators.reason) });
+          enriched.push({
+            ...base,
+            ...indicators,
+            liquidation: buildLiquidation(base.position),
+            signal: buildPendingSignal(indicators.reason),
+          });
           continue;
         }
 
         const signal = buildSignal(base.price, indicators);
-        enriched.push({ ...base, ...indicators, signal });
+        enriched.push({
+          ...base,
+          ...indicators,
+          liquidation: buildLiquidation(base.position),
+          signal,
+        });
       } catch (err) {
-        enriched.push(withError(base, err.message || "klines fetch error"));
+        enriched.push({
+          ...withError(base, err.message || "klines fetch error"),
+          liquidation: buildLiquidation(base.position),
+        });
       }
     }
 
@@ -61,6 +87,51 @@ export default async function handler(req, res) {
   } catch (err) {
     return sendError(res, 500, err.message || "unhandled error");
   }
+}
+
+async function fetchPositionRisk() {
+  try {
+    return await signedFetch("/fapi/v2/positionRisk");
+  } catch (err) {
+    console.warn("Position fetch failed:", err.message);
+    return [];
+  }
+}
+
+function mapPositions(positionRisk = []) {
+  const out = {};
+  for (const entry of positionRisk) {
+    const size = numberOrZero(entry.positionAmt);
+    if (size === 0) continue;
+    out[entry.symbol] = {
+      positionAmt: size,
+      entryPrice: numberOrZero(entry.entryPrice),
+      leverage: entry.leverage,
+      liquidationPrice: numberOrZero(entry.liquidationPrice),
+      markPrice: numberOrZero(entry.markPrice),
+      marginType: entry.marginType,
+      unrealizedProfit: numberOrZero(entry.unRealizedProfit),
+    };
+  }
+  return out;
+}
+
+function buildLiquidation(position) {
+  if (!position) {
+    return {
+      hasPosition: false,
+      message: "No active futures position",
+    };
+  }
+  return {
+    hasPosition: true,
+    marginType: position.marginType,
+    leverage: position.leverage,
+    entryPrice: position.entryPrice,
+    liquidationPrice: position.liquidationPrice,
+    markPrice: position.markPrice,
+    unrealizedProfit: position.unrealizedProfit,
+  };
 }
 
 function computeIndicators(klines) {
