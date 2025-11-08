@@ -1,9 +1,11 @@
 {
   "version": 2,
   "builds": [
-    { "src": "api/ticker.js", "use": "@vercel/node" }
+    { "src": "api/ticker.js", "use": "@vercel/node" },
+    { "src": "index.html", "use": "@vercel/static" }
   ],
   "routes": [
-    { "src": "/api/ticker", "dest": "/api/ticker.js" }
+    { "src": "/api/ticker", "dest": "/api/ticker.js" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
