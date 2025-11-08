@@ -1,7 +1,5 @@
-// api/ticker.js
-const BINANCE_URL = "https://data-api.binance.vision/api/v3/ticker/24hr";
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
+  const BINANCE_URL = "https://data-api.binance.vision/api/v3/ticker/24hr";
   try {
     const r = await fetch(BINANCE_URL, { method: "GET" });
     if (!r.ok) {
@@ -34,4 +32,4 @@ module.exports = async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     return res.status(500).json({ error: String(err) });
   }
-};
+}
