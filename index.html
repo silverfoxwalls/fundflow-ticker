@@ -5,71 +5,83 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fund Flow Dashboard</title>
   <style>
-    :root {
-      color-scheme: dark;
-    }
+    :root { color-scheme: dark; }
     body {
-      background: #050505;
-      color: #e5ffe5;
+      background: #04090b;
+      color: #eefbf7;
       font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
       margin: 0;
       padding: 24px;
     }
     h1 {
       text-align: center;
-      margin: 0 0 8px;
+      margin: 0 0 4px;
       color: #00ffa3;
       letter-spacing: 0.08em;
     }
     p.sub {
       text-align: center;
-      margin: 0;
+      margin: 0 0 20px;
       color: #5bffbf;
       font-size: 0.9rem;
       opacity: 0.8;
     }
     .table-wrapper {
-      margin-top: 24px;
-      border: 1px solid #0f3b2f;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 0 32px rgba(0, 255, 163, 0.08);
+      overflow-x: auto;
+      border-radius: 16px;
+      border: 1px solid rgba(0,255,163,0.12);
+      box-shadow: 0 0 32px rgba(0,255,163,0.08);
     }
     table {
       width: 100%;
+      min-width: 960px;
       border-collapse: collapse;
-      background: rgba(6, 20, 15, 0.92);
+      background: rgba(6, 24, 18, 0.92);
     }
     thead {
-      background: rgba(0, 255, 163, 0.08);
+      background: rgba(0,255,163,0.08);
     }
     th, td {
       padding: 12px 14px;
       text-align: left;
-      font-size: 0.92rem;
-      border-bottom: 1px solid rgba(0, 255, 163, 0.08);
+      font-size: 0.9rem;
+      border-bottom: 1px solid rgba(0,255,163,0.08);
+      vertical-align: top;
     }
     th {
       text-transform: uppercase;
       font-weight: 600;
       letter-spacing: 0.08em;
       color: #bbffe7;
+      white-space: nowrap;
     }
     tr:hover td {
-      background: rgba(0, 255, 163, 0.04);
+      background: rgba(0,255,163,0.05);
     }
-    .positive {
-      color: #00ffa3;
-    }
-    .negative {
-      color: #ff5f5f;
-    }
-    .neutral {
-      color: #ffd166;
-    }
-    .signal {
+    .positive { color: #00ffa3; }
+    .negative { color: #ff5f5f; }
+    .neutral { color: #ffd166; }
+    .signal-cell {
       font-weight: 700;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.03em;
+    }
+    .signal-cell.buy { color: #00ffa3; }
+    .signal-cell.sell { color: #ff5f5f; }
+    .signal-cell.watch-bull { color: #81ffea; }
+    .signal-cell.watch-bear { color: #ff9e7f; }
+    .signal-cell .reason {
+      display: block;
+      font-weight: 500;
+      font-size: 0.75rem;
+      opacity: 0.75;
+      margin-top: 4px;
+    }
+    .signal-cell .reason.positive { color: #7fffd4; }
+    .signal-cell .reason.negative { color: #ff8a80; }
+    .signal-cell .reason.neutral { color: #ffd166; }
+    .trend-lines div,
+    .momentum div {
+      line-height: 1.32;
     }
     footer {
       text-align: center;
@@ -82,7 +94,7 @@
 </head>
 <body>
   <h1>FUND FLOW RADAR</h1>
-  <p class="sub">Live Binance USDT pairs. Refreshes every 10 seconds.</p>
+  <p class="sub">Live Binance USDT pairs (1h candles). Auto-refresh every 10 seconds.</p>
 
   <div class="table-wrapper">
     <table id="dataTable">
@@ -92,11 +104,13 @@
           <th>Price</th>
           <th>% Change</th>
           <th>Fund Flow (USD)</th>
+          <th>Trend Lines</th>
+          <th>Momentum</th>
           <th>Signal</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td colspan="5">Loading live data鈥�</td></tr>
+        <tr><td colspan="7">Loading live data鈥�</td></tr>
       </tbody>
     </table>
   </div>
@@ -104,22 +118,24 @@
   <footer>Powered by your Vercel API & Binance market data.</footer>
 
   <script>
-    const API_URL = "https://fundflow-ticker-thwk0et2q-silverfoxwalls-s-projects.vercel.app/api/ticker";
+    const API_URL = "https://fundflow-ticker-5vc0d00it-silverfoxwalls-s-projects.vercel.app/api/ticker";
 
-    function classifySignal(c) {
-      if (c.fundFlow > 15000000 && c.change > 4) return { label: "馃煝 STRONG BUY", class: "positive" };
-      if (c.fundFlow < -15000000 && c.change < -4) return { label: "馃敶 STRONG SELL", class: "negative" };
-      if (Math.abs(c.fundFlow) > 5000000 && Math.abs(c.change) < 2) return { label: "馃煛 WATCH 鈿狅笍", class: "neutral" };
-      if (c.fundFlow < 0 && c.change > 3) return { label: "鈿狅笍 BULL TRAP?", class: "neutral" };
-      if (c.fundFlow > 0 && c.change < -3) return { label: "馃槤 BUY RUMOR?", class: "neutral" };
-      return { label: "馃 HOLD", class: "neutral" };
+    function formatNumber(value, decimals = 2) {
+      if (value === null || value === undefined || !isFinite(value)) return "鈿狅笍";
+      return Number(value).toFixed(decimals);
+    }
+
+    function makeReason(text) {
+      if (text.startsWith("✅") || text.startsWith("馃嚡") || text.startsWith("馃憦") || text.startsWith("馃搳")) return { text, className: "positive" };
+      if (text.startsWith("⚠️") || text.startsWith("馃敶") || text.startsWith("馃挧")) return { text, className: "negative" };
+      return { text, className: "neutral" };
     }
 
     async function loadData() {
       const tbody = document.querySelector("#dataTable tbody");
       try {
         const res = await fetch(API_URL);
-        if (!res.ok) throw new Error("HTTP " + res.status);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const data = json.data || [];
         tbody.innerHTML = "";
@@ -127,25 +143,48 @@
         data.forEach((c) => {
           const changeClass = c.change >= 0 ? "positive" : "negative";
           const flowClass = c.fundFlow >= 0 ? "positive" : "negative";
-          const sig = classifySignal(c);
+          const signalSide = c.signal?.side || "neutral";
 
           const row = document.createElement("tr");
           row.innerHTML = `
             <td>${c.symbol}</td>
-            <td>${Number(c.price).toFixed(4)}</td>
-            <td class="${changeClass}">${Number(c.change).toFixed(2)}%</td>
-            <td class="${flowClass}">${Number(c.fundFlow).toLocaleString()}</td>
-            <td class="signal ${sig.class}">${sig.label}</td>
+            <td>${formatNumber(c.price, 4)}</td>
+            <td class="${changeClass}">${formatNumber(c.change, 2)}%</td>
+            <td class="${flowClass}">${Number(c.fundFlow || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+            <td class="trend-lines">
+              <div>EMA12: <span class="${c.price > c.ema12 ? "positive" : "negative"}">${formatNumber(c.ema12, 4)}</span></div>
+              <div>EMA48: <span class="${c.price > c.ema48 ? "positive" : "negative"}">${formatNumber(c.ema48, 4)}</span></div>
+              <div>EMA192: <span class="${c.price > c.ema192 ? "positive" : "negative"}">${formatNumber(c.ema192, 4)}</span></div>
+              <div>VWAP: <span class="${c.price > c.vwap ? "positive" : "negative"}">${formatNumber(c.vwap, 4)}</span></div>
+            </td>
+            <td class="momentum">
+              <div>RSI14: <span class="${c.rsi >= 55 ? "positive" : c.rsi <= 45 ? "negative" : "neutral"}">${formatNumber(c.rsi, 2)}</span> (EMA3: ${formatNumber(c.rsiSignal, 2)})</div>
+              <div>MACD: <span class="${c.macdLine >= c.macdSignal ? "positive" : "negative"}">${formatNumber(c.macdLine, 4)}</span></div>
+              <div>Signal: ${formatNumber(c.macdSignal, 4)}</div>
+              <div>Hist: <span class="${c.macdHistogram >= 0 ? "positive" : "negative"}">${formatNumber(c.macdHistogram, 4)}</span></div>
+            </td>
+            <td class="signal-cell ${signalSide}">
+              ${c.signal?.label || "馃 Neutral"}
+              <div class="reason-container"></div>
+            </td>
           `;
+          const reasonContainer = row.querySelector(".reason-container");
+          (c.signal?.reasons || []).forEach((r) => {
+            const { text, className } = makeReason(r);
+            const div = document.createElement("div");
+            div.className = `reason ${className}`;
+            div.textContent = text;
+            reasonContainer.appendChild(div);
+          });
           tbody.appendChild(row);
         });
 
         if (data.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="5">No data returned. Try reloading in a moment.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="7">No data returned. Try reloading in a moment.</td></tr>`;
         }
       } catch (e) {
-        console.error(e);
-        tbody.innerHTML = `<tr><td colspan="5" class="negative">Error fetching data: ${e.message}</td></tr>`;
+        console.error("Dashboard error:", e);
+        tbody.innerHTML = `<tr><td colspan="7" class="negative">Error fetching data: ${e.message}</td></tr>`;
       }
     }
 
