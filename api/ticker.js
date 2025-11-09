@@ -6,6 +6,15 @@ const CANDLE_LIMIT = 200;
 const MAX_SYMBOLS = 12;
 
 export default async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
+
   try {
     const [tickerRes, positionRisk] = await Promise.all([
       fetch(BINANCE_TICKER_URL),
@@ -29,7 +38,9 @@ export default async function handler(req, res) {
           price: numberOrZero(s.lastPrice),
           change: numberOrZero(s.priceChangePercent),
           quoteVolume: numberOrZero(s.quoteVolume),
-          fundFlow: numberOrZero(s.quoteVolume) * (numberOrZero(s.priceChangePercent) / 100),
+          fundFlow:
+            numberOrZero(s.quoteVolume) *
+            (numberOrZero(s.priceChangePercent) / 100),
           position,
         };
       })
@@ -77,7 +88,6 @@ export default async function handler(req, res) {
       }
     }
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(200).json({
       ts: Date.now(),
       interval: INTERVAL,
@@ -97,6 +107,9 @@ async function fetchPositionRisk() {
     return [];
   }
 }
+
+// ... (rest of the helper functions exactly as you already have them) ...
+EOF
 
 function mapPositions(positionRisk = []) {
   const out = {};
