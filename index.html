@@ -1,16 +1,126 @@
-<!-- keep your existing structure/styles—just ensure this function is in the script -->
-<script>
-  function renderLiqLevels(liquidation) {
-    if (!liquidation) return "<div>—</div>";
-    if (!liquidation.hasPosition) {
-      return `<div>—</div><div class="liq-note">${liquidation.message}</div>`;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Fund Flow Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>📊 Fund Flow Dashboard</h1>
+  <div id="error-box" class="error" style="display:none"></div>
+  <p>Last updated: <span id="last-updated">—</span></p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th>Price</th>
+        <th>% Change</th>
+        <th>Quote Volume</th>
+        <th>Fund Flow</th>
+        <th>Liquidation</th>
+      </tr>
+    </thead>
+    <tbody id="ticker-body">
+      <tr><td colspan="6" class="loading">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 2rem; background: #101624; color: #eef1ff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #2a3350; }
+    .loading { text-align: center; color: #7781a8; }
+    .error { padding: 0.75rem; background: #ff4d62; color: #1a0b0f; margin-bottom: 1rem; border-radius: 6px; }
+    .pos { color: #3ae374; }
+    .neg { color: #ff6b6b; }
+    .liq-note { color: #8892b0; font-size: 0.85rem; margin-top: 0.25rem; }
+  </style>
+
+  <script>
+    const API_URL = "/api/ticker";
+    const tableBody = document.querySelector("#ticker-body");
+    const updatedAt = document.querySelector("#last-updated");
+    const errorBox = document.querySelector("#error-box");
+
+    document.addEventListener("DOMContentLoaded", () => {
+      loadData();
+      setInterval(loadData, 15000);
+    });
+
+    async function loadData() {
+      toggleError(false);
+      tableBody.innerHTML = '<tr><td colspan="6" class="loading">Loading…</td></tr>';
+
+      try {
+        const payload = await fetchTicker();
+        renderRows(payload);
+        updatedAt.textContent = new Date(payload.ts).toLocaleTimeString();
+      } catch (err) {
+        renderError(err);
+      }
     }
-    return `
-      <div>${liquidation.marginType} | ${liquidation.leverage}×</div>
-      <div>Entry: ${formatNumber(liquidation.entryPrice, 2)}</div>
-      <div>Mark: ${formatNumber(liquidation.markPrice, 2)}</div>
-      <div>Liquidation: ${formatNumber(liquidation.liquidationPrice, 2)}</div>
-      <div>PnL: ${formatNumber(liquidation.unrealizedProfit, 2)}</div>
-    `;
-  }
-</script>
+
+    async function fetchTicker() {
+      const res = await fetch(API_URL);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(\`API \${res.status}: \${text}\`);
+      }
+      return res.json();
+    }
+
+    function renderRows(payload) {
+      const rows = payload.data.map((item) => \`
+        <tr>
+          <td>\${item.symbol}</td>
+          <td>\${formatNumber(item.price)}</td>
+          <td class="\${item.change >= 0 ? "pos" : "neg"}">\${formatNumber(item.change, 2)}%</td>
+          <td>\${formatNumber(item.quoteVolume, 0)}</td>
+          <td>\${formatNumber(item.fundFlow, 0)}</td>
+          <td>\${renderLiqLevels(item.liquidation)}</td>
+        </tr>
+      \`);
+
+      tableBody.innerHTML = rows.join("") || '<tr><td colspan="6" class="loading">No data returned.</td></tr>';
+    }
+
+    function renderError(err) {
+      console.error("Dashboard error:", err);
+      toggleError(true, err.message || "Unknown error");
+      tableBody.innerHTML = '<tr><td colspan="6" class="loading">—</td></tr>';
+      updatedAt.textContent = "—";
+    }
+
+    function toggleError(show, message = "") {
+      if (!errorBox) return;
+      errorBox.style.display = show ? "block" : "none";
+      errorBox.textContent = show ? \`⚠️ \${message}\` : "";
+    }
+
+    function renderLiqLevels(liquidation) {
+      if (!liquidation || !liquidation.hasPosition) {
+        return '<div>—</div><div class="liq-note">' +
+          (liquidation?.message ?? "No active futures position") +
+          "</div>";
+      }
+      return \`
+        <div>\${liquidation.marginType} | \${liquidation.leverage}×</div>
+        <div>Entry: \${formatNumber(liquidation.entryPrice, 2)}</div>
+        <div>Mark: \${formatNumber(liquidation.markPrice, 2)}</div>
+        <div>Liquidation: \${formatNumber(liquidation.liquidationPrice, 2)}</div>
+        <div>PnL: \${formatNumber(liquidation.unrealizedProfit, 2)}</div>
+      \`;
+    }
+
+    function formatNumber(value, decimals = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return n.toLocaleString("en-US", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      });
+    }
+  </script>
+</body>
+</html>
