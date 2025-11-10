@@ -9,7 +9,6 @@
   <h1>📊 Fund Flow Dashboard</h1>
   <div id="error-box" class="error" style="display:none"></div>
   <p>Last updated: <span id="last-updated">—</span></p>
-
   <table>
     <thead>
       <tr>
@@ -18,143 +17,158 @@
         <th>% Change</th>
         <th>Quote Volume</th>
         <th>Fund Flow</th>
-        <th>Liquidation</th>
+        <th>EMA 12</th>
+        <th>EMA 48</th>
+        <th>EMA 192</th>
+        <th>VWAP</th>
+        <th>RSI 14</th>
+        <th>Signal</th>
       </tr>
     </thead>
     <tbody id="ticker-body">
-      <tr><td colspan="6" class="loading">Loading…</td></tr>
+      <tr><td colspan="11" class="loading">Loading…</td></tr>
     </tbody>
   </table>
 
   <style>
     body { font-family: system-ui, sans-serif; padding: 2rem; background: #101624; color: #eef1ff; }
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
-    th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #2a3350; }
+    th, td { padding: 0.65rem; text-align: left; border-bottom: 1px solid #2a3350; vertical-align: top; }
+    th { font-size: 0.85rem; letter-spacing: 0.03em; text-transform: uppercase; }
     .loading { text-align: center; color: #7781a8; }
     .error { padding: 0.75rem; background: #ff4d62; color: #1a0b0f; margin-bottom: 1rem; border-radius: 6px; }
     .pos { color: #3ae374; }
     .neg { color: #ff6b6b; }
-    .liq-note { color: #8892b0; font-size: 0.85rem; margin-top: 0.25rem; }
+    .neutral { color: #f8d04f; }
+    .watch-bull { color: #61dafb; }
+    .watch-bear { color: #da70d6; }
+    .watchout { color: #f6c177; }
+    .signal-cell { font-weight: 600; text-transform: uppercase; }
+    .signal-reasons { margin-top: 0.4rem; font-size: 0.82rem; line-height: 1.35; color: #94a3c6; }
+    .signal-reasons div { margin-bottom: 0.2rem; }
   </style>
 
-  <script>
-    (function () {
-      var API_URL = "/api/ticker";
-      var tableBody = document.getElementById("ticker-body");
-      var updatedAt = document.getElementById("last-updated");
-      var errorBox = document.getElementById("error-box");
+  <script type="module">
+    const API_URL = "/api/ticker";
+    const tableBody = document.querySelector("#ticker-body");
+    const updatedAt = document.querySelector("#last-updated");
+    const errorBox = document.querySelector("#error-box");
 
-      if (!tableBody || !updatedAt) {
-        console.error("Required DOM nodes not found.");
+    document.addEventListener("DOMContentLoaded", () => {
+      loadData();
+      setInterval(loadData, 60_000);
+    });
+
+    async function loadData() {
+      toggleError(false);
+      if (!tableBody.dataset.initialized) {
+        tableBody.innerHTML = '<tr><td colspan="11" class="loading">Loading…</td></tr>';
+      }
+
+      try {
+        const payload = await fetchTicker();
+        renderRows(payload);
+        updatedAt.textContent = new Date(payload.ts).toLocaleTimeString();
+        tableBody.dataset.initialized = "true";
+      } catch (err) {
+        renderError(err);
+      }
+    }
+
+    async function fetchTicker() {
+      const res = await fetch(API_URL);
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`API ${res.status}: ${txt}`);
+      }
+      return res.json();
+    }
+
+    function renderRows(payload) {
+      if (!payload?.data?.length) {
+        tableBody.innerHTML = '<tr><td colspan="11" class="loading">No data returned.</td></tr>';
         return;
       }
 
-      console.log("Dashboard script loaded – requesting data…");
-      loadData();
-      setInterval(loadData, 15000);
+      const rows = payload.data.map((item) => {
+        const changeClass = item.change >= 0 ? "pos" : "neg";
+        const signalSide = item.signal?.side ?? "neutral";
+        const signalClass = signalClassName(signalSide);
 
-      function loadData() {
-        toggleError(false);
-        tableBody.innerHTML = '<tr><td colspan="6" class="loading">Loading…</td></tr>';
+        return `
+          <tr>
+            <td>${escapeHTML(item.symbol)}</td>
+            <td>${formatNumber(item.price)}</td>
+            <td class="${changeClass}">${formatNumber(item.change, 2)}%</td>
+            <td>${formatNumber(item.quoteVolume, 0)}</td>
+            <td>${formatNumber(item.fundFlow, 6)}</td>
+            <td>${formatMaybeNumber(item.ema12, 2)}</td>
+            <td>${formatMaybeNumber(item.ema48, 2)}</td>
+            <td>${formatMaybeNumber(item.ema192, 2)}</td>
+            <td>${formatMaybeNumber(item.vwap, 2)}</td>
+            <td>${formatMaybeNumber(item.rsi, 1)}</td>
+            <td class="signal-cell ${signalClass}">
+              ${escapeHTML(item.signal?.label ?? "🥱 Neutral")}
+              ${renderReasons(item.signal?.reasons)}
+            </td>
+          </tr>`;
+      });
 
-        fetchTicker()
-          .then(function (payload) {
-            console.log("Ticker payload received", payload);
-            renderRows(payload);
-            if (payload && typeof payload.ts === "number") {
-              updatedAt.textContent = new Date(payload.ts).toLocaleTimeString();
-            } else {
-              updatedAt.textContent = "—";
-            }
-          })
-          .catch(function (err) {
-            renderError(err);
-          });
+      tableBody.innerHTML = rows.join("");
+    }
+
+    function renderReasons(reasons) {
+      if (!Array.isArray(reasons) || reasons.length === 0) return "";
+      const inner = reasons.map((line) => "<div>" + escapeHTML(line) + "</div>").join("");
+      return '<div class="signal-reasons">' + inner + "</div>";
+    }
+
+    function renderError(err) {
+      console.error("Dashboard error:", err);
+      toggleError(true, err.message || "Unknown error");
+      tableBody.innerHTML = '<tr><td colspan="11" class="loading">—</td></tr>';
+      updatedAt.textContent = "—";
+    }
+
+    function toggleError(show, message = "") {
+      if (!errorBox) return;
+      errorBox.style.display = show ? "block" : "none";
+      errorBox.textContent = show ? `⚠️ ${message}` : "";
+    }
+
+    function signalClassName(side) {
+      switch (side) {
+        case "buy": return "pos";
+        case "sell": return "neg";
+        case "watchout": return "watchout";
+        case "watch-bull": return "watch-bull";
+        case "watch-bear": return "watch-bear";
+        default: return "neutral";
       }
+    }
 
-      function fetchTicker() {
-        return fetch(API_URL, { method: "GET" })
-          .then(function (res) {
-            if (!res.ok) {
-              return res.text().then(function (text) {
-                throw new Error("API " + res.status + ": " + text);
-              });
-            }
-            return res.json();
-          });
-      }
+    function formatNumber(value, decimals = 2) {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return "—";
+      return n.toLocaleString("en-US", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      });
+    }
 
-      function renderRows(payload) {
-        if (!payload || !payload.data || !payload.data.length) {
-          tableBody.innerHTML = '<tr><td colspan="6" class="loading">No data returned.</td></tr>';
-          return;
-        }
+    function formatMaybeNumber(value, decimals = 2) {
+      return Number.isFinite(Number(value)) ? formatNumber(value, decimals) : "—";
+    }
 
-        var rows = payload.data.map(function (item) {
-          return (
-            "<tr>" +
-              "<td>" + escapeHTML(item.symbol) + "</td>" +
-              "<td>" + formatNumber(item.price) + "</td>" +
-              '<td class="' + (item.change >= 0 ? "pos" : "neg") + '">' +
-                formatNumber(item.change, 2) + "%</td>" +
-              "<td>" + formatNumber(item.quoteVolume, 0) + "</td>" +
-              "<td>" + formatNumber(item.fundFlow, 0) + "</td>" +
-              "<td>" + renderLiqLevels(item.liquidation) + "</td>" +
-            "</tr>"
-          );
-        });
-
-        tableBody.innerHTML = rows.join("");
-      }
-
-      function renderError(err) {
-        console.error("Dashboard error:", err);
-        toggleError(true, err && err.message ? err.message : "Unknown error");
-        tableBody.innerHTML = '<tr><td colspan="6" class="loading">—</td></tr>';
-        updatedAt.textContent = "—";
-      }
-
-      function toggleError(show, message) {
-        if (!errorBox) return;
-        errorBox.style.display = show ? "block" : "none";
-        errorBox.textContent = show ? "⚠️ " + message : "";
-      }
-
-      function renderLiqLevels(liquidation) {
-        if (!liquidation || !liquidation.hasPosition) {
-          var note = liquidation && liquidation.message ? liquidation.message : "No active futures position";
-          return '<div>—</div><div class="liq-note">' + escapeHTML(note) + "</div>";
-        }
-
-        return (
-          "<div>" + escapeHTML(liquidation.marginType) + " | " + escapeHTML(String(liquidation.leverage)) + "×</div>" +
-          "<div>Entry: " + formatNumber(liquidation.entryPrice, 2) + "</div>" +
-          "<div>Mark: " + formatNumber(liquidation.markPrice, 2) + "</div>" +
-          "<div>Liquidation: " + formatNumber(liquidation.liquidationPrice, 2) + "</div>" +
-          "<div>PnL: " + formatNumber(liquidation.unrealizedProfit, 2) + "</div>"
-        );
-      }
-
-      function formatNumber(value, decimals) {
-        if (decimals === undefined) decimals = 2;
-        var n = Number(value);
-        if (!isFinite(n)) return "—";
-        return n.toLocaleString("en-US", {
-          minimumFractionDigits: decimals,
-          maximumFractionDigits: decimals
-        });
-      }
-
-      function escapeHTML(value) {
-        if (value === undefined || value === null) return "";
-        return String(value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
-    })();
+    function escapeHTML(value) {
+      if (value === undefined || value === null) return "";
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
   </script>
 </body>
 </html>

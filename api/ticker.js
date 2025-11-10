@@ -1,9 +1,22 @@
+import dotenv from "dotenv";
 import { signedFetch } from "../lib/binanceClient.js";
 
+dotenv.config();
+
 const BINANCE_TICKER_URL = "https://data-api.binance.vision/api/v3/ticker/24hr";
-const INTERVAL = "1h";
-const CANDLE_LIMIT = 200;
-const MAX_SYMBOLS = 12;
+
+const DEFAULT_INTERVAL = process.env.DASHBOARD_INTERVAL || "1h";
+const DEFAULT_CANDLE_LIMIT = 320; // now enough candles for MACD slow+signal
+const MAX_CANDLE_LIMIT = 500;
+const DEFAULT_SYMBOL_LIMIT = 12;
+const MAX_SYMBOL_LIMIT = 50;
+const SYMBOL_WHITELIST = (process.env.DASHBOARD_SYMBOLS || "")
+  .split(",")
+  .map((sym) => sym.trim().toUpperCase())
+  .filter(Boolean);
+const INTERVAL = DEFAULT_INTERVAL;
+const CANDLE_LIMIT = clampLimit(process.env.DASHBOARD_LOOKBACK, DEFAULT_CANDLE_LIMIT, MAX_CANDLE_LIMIT);
+const MAX_SYMBOLS = clampLimit(process.env.DASHBOARD_LIMIT, DEFAULT_SYMBOL_LIMIT, MAX_SYMBOL_LIMIT);
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -24,11 +37,17 @@ export default async function handler(req, res) {
     if (!tickerRes.ok) {
       return sendError(res, 502, `Ticker fetch failed (${tickerRes.status})`);
     }
-    const positionsBySymbol = mapPositions(positionRisk);
+
     const tickers = await tickerRes.json();
+    const positionsBySymbol = mapPositions(positionRisk);
 
     const usdt = tickers
-      .filter((s) => typeof s.symbol === "string" && s.symbol.endsWith("USDT"))
+        .filter(
+    (s) =>
+      typeof s.symbol === "string" &&
+      s.symbol.endsWith("USDT") &&
+      (SYMBOL_WHITELIST.length === 0 || SYMBOL_WHITELIST.includes(s.symbol))
+  )
       .map((s) => {
         const symbol = s.symbol.replace("USDT", "");
         const position = positionsBySymbol[s.symbol] || null;
@@ -48,6 +67,7 @@ export default async function handler(req, res) {
       .slice(0, MAX_SYMBOLS);
 
     const enriched = [];
+
     for (const base of usdt) {
       const candleUrl = `https://data-api.binance.vision/api/v3/klines?symbol=${base.pair}&interval=${INTERVAL}&limit=${CANDLE_LIMIT}`;
       try {
@@ -56,6 +76,7 @@ export default async function handler(req, res) {
           enriched.push(withError(base, `klines ${candleRes.status}`));
           continue;
         }
+
         const klines = await candleRes.json();
         if (!Array.isArray(klines) || klines.length === 0) {
           enriched.push(withError(base, "no candles"));
@@ -86,6 +107,8 @@ export default async function handler(req, res) {
           liquidation: buildLiquidation(base.position),
         });
       }
+
+      await sleep(80); // still going easy on the public endpoint
     }
 
     res.status(200).json({
@@ -107,9 +130,6 @@ async function fetchPositionRisk() {
     return [];
   }
 }
-
-// ... (rest of the helper functions exactly as you already have them) ...
-EOF
 
 function mapPositions(positionRisk = []) {
   const out = {};
@@ -200,9 +220,12 @@ function buildSignal(price, ind) {
   const priceBelow192 = price < ind.ema192;
   const priceBelowVWAP = price < ind.vwap;
 
-  const priceStackBull = priceAbove12 && priceAbove48 && priceAbove192 && priceAboveVWAP;
-  const priceStackBear = priceBelow12 && priceBelow48 && priceBelow192 && priceBelowVWAP;
-  const priceAlmostBull = priceAbove12 && priceAbove48 && priceAboveVWAP && !priceAbove192;
+  const priceStackBull =
+    priceAbove12 && priceAbove48 && priceAbove192 && priceAboveVWAP;
+  const priceStackBear =
+    priceBelow12 && priceBelow48 && priceBelow192 && priceBelowVWAP;
+  const priceAlmostBull =
+    priceAbove12 && priceAbove48 && priceAboveVWAP && !priceAbove192;
 
   const rsiBull = ind.rsi > ind.rsiSignal && ind.rsi > 55;
   const rsiBear = ind.rsi < ind.rsiSignal && ind.rsi < 45;
@@ -269,15 +292,28 @@ function buildSignal(price, ind) {
       : "➖ MACD flat",
   ];
 
-  const positiveCount = [priceAbove12 && priceAbove48 && priceAboveVWAP, rsiBull, macdBull].filter(Boolean).length;
-  const negativeCount = [priceBelow12 && priceBelow48 && priceBelowVWAP, rsiBear, macdBear].filter(Boolean).length;
+  const positiveCount = [
+    priceAbove12 && priceAbove48 && priceAboveVWAP,
+    rsiBull,
+    macdBull,
+  ].filter(Boolean).length;
+  const negativeCount = [
+    priceBelow12 && priceBelow48 && priceBelowVWAP,
+    rsiBear,
+    macdBear,
+  ].filter(Boolean).length;
 
   let label = "🥱 Neutral";
   if (positiveCount >= 2) label = "Watch (Bullish lean)";
   if (negativeCount >= 2) label = "Watch (Bearish lean)";
 
   return {
-    side: positiveCount >= 2 ? "watch-bull" : negativeCount >= 2 ? "watch-bear" : "neutral",
+    side:
+      positiveCount >= 2
+        ? "watch-bull"
+        : negativeCount >= 2
+        ? "watch-bear"
+        : "neutral",
     label,
     reasons: blendedReasons,
   };
@@ -322,6 +358,7 @@ function numberOrZero(value) {
 }
 
 function emaLatest(values, period) {
+  if (!Array.isArray(values) || values.length < period) return null;
   const out = emaSeries(values, period);
   return out ? out.latest : null;
 }
@@ -439,4 +476,14 @@ function computeMACD(values, fast, slow, signalPeriod) {
     signal,
     histogram,
   };
+}
+
+function clampLimit(raw, fallback, max) {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, 1), max);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
