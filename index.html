@@ -38,89 +38,123 @@
   </style>
 
   <script>
-    const API_URL = "/api/ticker";
-    const tableBody = document.querySelector("#ticker-body");
-    const updatedAt = document.querySelector("#last-updated");
-    const errorBox = document.querySelector("#error-box");
+    (function () {
+      var API_URL = "/api/ticker";
+      var tableBody = document.getElementById("ticker-body");
+      var updatedAt = document.getElementById("last-updated");
+      var errorBox = document.getElementById("error-box");
 
-    document.addEventListener("DOMContentLoaded", () => {
+      if (!tableBody || !updatedAt) {
+        console.error("Required DOM nodes not found.");
+        return;
+      }
+
+      console.log("Dashboard script loaded – requesting data…");
       loadData();
       setInterval(loadData, 15000);
-    });
 
-    async function loadData() {
-      toggleError(false);
-      tableBody.innerHTML = '<tr><td colspan="6" class="loading">Loading…</td></tr>';
+      function loadData() {
+        toggleError(false);
+        tableBody.innerHTML = '<tr><td colspan="6" class="loading">Loading…</td></tr>';
 
-      try {
-        const payload = await fetchTicker();
-        renderRows(payload);
-        updatedAt.textContent = new Date(payload.ts).toLocaleTimeString();
-      } catch (err) {
-        renderError(err);
+        fetchTicker()
+          .then(function (payload) {
+            console.log("Ticker payload received", payload);
+            renderRows(payload);
+            if (payload && typeof payload.ts === "number") {
+              updatedAt.textContent = new Date(payload.ts).toLocaleTimeString();
+            } else {
+              updatedAt.textContent = "—";
+            }
+          })
+          .catch(function (err) {
+            renderError(err);
+          });
       }
-    }
 
-    async function fetchTicker() {
-      const res = await fetch(API_URL);
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(\`API \${res.status}: \${text}\`);
+      function fetchTicker() {
+        return fetch(API_URL, { method: "GET" })
+          .then(function (res) {
+            if (!res.ok) {
+              return res.text().then(function (text) {
+                throw new Error("API " + res.status + ": " + text);
+              });
+            }
+            return res.json();
+          });
       }
-      return res.json();
-    }
 
-    function renderRows(payload) {
-      const rows = payload.data.map((item) => \`
-        <tr>
-          <td>\${item.symbol}</td>
-          <td>\${formatNumber(item.price)}</td>
-          <td class="\${item.change >= 0 ? "pos" : "neg"}">\${formatNumber(item.change, 2)}%</td>
-          <td>\${formatNumber(item.quoteVolume, 0)}</td>
-          <td>\${formatNumber(item.fundFlow, 0)}</td>
-          <td>\${renderLiqLevels(item.liquidation)}</td>
-        </tr>
-      \`);
+      function renderRows(payload) {
+        if (!payload || !payload.data || !payload.data.length) {
+          tableBody.innerHTML = '<tr><td colspan="6" class="loading">No data returned.</td></tr>';
+          return;
+        }
 
-      tableBody.innerHTML = rows.join("") || '<tr><td colspan="6" class="loading">No data returned.</td></tr>';
-    }
+        var rows = payload.data.map(function (item) {
+          return (
+            "<tr>" +
+              "<td>" + escapeHTML(item.symbol) + "</td>" +
+              "<td>" + formatNumber(item.price) + "</td>" +
+              '<td class="' + (item.change >= 0 ? "pos" : "neg") + '">' +
+                formatNumber(item.change, 2) + "%</td>" +
+              "<td>" + formatNumber(item.quoteVolume, 0) + "</td>" +
+              "<td>" + formatNumber(item.fundFlow, 0) + "</td>" +
+              "<td>" + renderLiqLevels(item.liquidation) + "</td>" +
+            "</tr>"
+          );
+        });
 
-    function renderError(err) {
-      console.error("Dashboard error:", err);
-      toggleError(true, err.message || "Unknown error");
-      tableBody.innerHTML = '<tr><td colspan="6" class="loading">—</td></tr>';
-      updatedAt.textContent = "—";
-    }
-
-    function toggleError(show, message = "") {
-      if (!errorBox) return;
-      errorBox.style.display = show ? "block" : "none";
-      errorBox.textContent = show ? \`⚠️ \${message}\` : "";
-    }
-
-    function renderLiqLevels(liquidation) {
-      if (!liquidation || !liquidation.hasPosition) {
-        return '<div>—</div><div class="liq-note">' +
-          (liquidation?.message ?? "No active futures position") +
-          "</div>";
+        tableBody.innerHTML = rows.join("");
       }
-      return \`
-        <div>\${liquidation.marginType} | \${liquidation.leverage}×</div>
-        <div>Entry: \${formatNumber(liquidation.entryPrice, 2)}</div>
-        <div>Mark: \${formatNumber(liquidation.markPrice, 2)}</div>
-        <div>Liquidation: \${formatNumber(liquidation.liquidationPrice, 2)}</div>
-        <div>PnL: \${formatNumber(liquidation.unrealizedProfit, 2)}</div>
-      \`;
-    }
 
-    function formatNumber(value, decimals = 2) {
-      const n = Number(value);
-      if (!Number.isFinite(n)) return "—";
-      return n.toLocaleString("en-US", {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      });
-    }
+      function renderError(err) {
+        console.error("Dashboard error:", err);
+        toggleError(true, err && err.message ? err.message : "Unknown error");
+        tableBody.innerHTML = '<tr><td colspan="6" class="loading">—</td></tr>';
+        updatedAt.textContent = "—";
+      }
+
+      function toggleError(show, message) {
+        if (!errorBox) return;
+        errorBox.style.display = show ? "block" : "none";
+        errorBox.textContent = show ? "⚠️ " + message : "";
+      }
+
+      function renderLiqLevels(liquidation) {
+        if (!liquidation || !liquidation.hasPosition) {
+          var note = liquidation && liquidation.message ? liquidation.message : "No active futures position";
+          return '<div>—</div><div class="liq-note">' + escapeHTML(note) + "</div>";
+        }
+
+        return (
+          "<div>" + escapeHTML(liquidation.marginType) + " | " + escapeHTML(String(liquidation.leverage)) + "×</div>" +
+          "<div>Entry: " + formatNumber(liquidation.entryPrice, 2) + "</div>" +
+          "<div>Mark: " + formatNumber(liquidation.markPrice, 2) + "</div>" +
+          "<div>Liquidation: " + formatNumber(liquidation.liquidationPrice, 2) + "</div>" +
+          "<div>PnL: " + formatNumber(liquidation.unrealizedProfit, 2) + "</div>"
+        );
+      }
+
+      function formatNumber(value, decimals) {
+        if (decimals === undefined) decimals = 2;
+        var n = Number(value);
+        if (!isFinite(n)) return "—";
+        return n.toLocaleString("en-US", {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals
+        });
+      }
+
+      function escapeHTML(value) {
+        if (value === undefined || value === null) return "";
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+    })();
   </script>
 </body>
 </html>
